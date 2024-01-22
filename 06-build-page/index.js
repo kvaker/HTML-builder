@@ -35,35 +35,47 @@ fs.readdir(pathStyles, { withFileTypes: true }, async (error, files) => {
 });
 
 function recurceCopy(dir, exit) {
-    fs.readdir(dir, { withFileTypes: true }, function (error, files) {
-        if (error) throw error;
-        files.forEach(function (file) {
-            if (!file.isFile()) {
-                fs.stat(path.join(exit, file.name), function (error) {
-                    if (error) {
-                        fs.mkdir(path.join(exit, file.name), function (error) {
-                            if (error) {
-                                return console.erroror(error);
-                            }
-                        });
-                        recurceCopy(`${dir}\\${file.name}`, path.join(exit, file.name));
-                    } else {
-                        recurceCopy(`${dir}\\${file.name}`, path.join(exit, file.name));
-                    }
-                });
+    return new Promise((resolve, reject) => {
+        fs.readdir(dir, { withFileTypes: true }, function (error, files) {
+            if (error) {
+                reject(error);
             } else {
-                fs.copyFile(`${dir}\\${file.name}`, `${exit}\\${file.name}`, function (error) {
-                    if (error) throw error;
+                let copyOperations = files.map(function (file) {
+                    return new Promise((resolve, reject) => {
+                        let oldPath = path.join(dir, file.name);
+                        let newPath = path.join(exit, file.name);
+
+                        if (!file.isFile()) {
+                            fs.mkdir(newPath, { recursive: true }, function (error) {
+                                if (error) {
+                                    reject(error);
+                                } else {
+                                    recurceCopy(oldPath, newPath).then(resolve).catch(reject);
+                                }
+                            });
+                        } else {
+                            fs.copyFile(oldPath, newPath, function (error) {
+                                if (error) {
+                                    reject(error);
+                                } else {
+                                    resolve();
+                                }
+                            });
+                        }
+                    });
                 });
+
+                Promise.all(copyOperations).then(() => resolve()).catch(error => reject(error));
             }
         });
     });
 }
+
 fs.stat(pathCopy, function (error) {
     if (error) {
         fs.mkdir(pathCopy, function (error) {
             if (error) {
-                return console.erroror(error);
+                return console.error(error);
             }
         });
         createTemplate();
@@ -83,7 +95,7 @@ fs.stat(pathAssetsCopy, function (error) {
     if (error) {
         fs.mkdir(pathAssetsCopy, function (error) {
             if (error) {
-                return console.erroror(error);
+                return console.error(error);
             }
 
         });
@@ -101,17 +113,27 @@ function createTemplate() {
             fs.readdir(folderPath, { withFileTypes: true }, function (error, files) {
                 if (error) throw error;
 
+                let replacements = [];
                 files.forEach(function (file) {
-                    fs.readFile(`${folderPath}\\${file.name}`, 'utf8', function (error, dataFile) {
-                        if (error) throw error;
-                        let tagName = `{{${file.name.split('.')[0]}}}`;
-                        data = data.replace(tagName, dataFile);
-                        fs.writeFile(`${pathCopy}\\index.html`, data, function (error) {
-                            if (error)
-                                console.log(error);
+                    replacements.push(new Promise((resolve, reject) => {
+                        fs.readFile(`${folderPath}\\${file.name}`, 'utf8', function (error, dataFile) {
+                            if (error) reject(error);
+                            let tagName = `{{${file.name.split('.')[0]}}}`;
+                            resolve({tag: tagName, data: dataFile});
                         });
-                    });
+                    }));
+                });
 
+                Promise.all(replacements).then(values => {
+                    values.forEach(replacement => {
+                        data = data.replace(replacement.tag, replacement.data);
+                    });
+                    fs.writeFile(`${pathCopy}\\index.html`, data, function (error) {
+                        if (error)
+                            console.log(error);
+                    });
+                }).catch(error => {
+                    console.log(error);
                 });
 
             });
@@ -119,5 +141,4 @@ function createTemplate() {
         });
 
     });
-
 }
